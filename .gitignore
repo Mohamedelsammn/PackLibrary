@@ -36,9 +36,21 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+# production file contains real secrets — never commit
+.env.production.example
 
 # vercel
 .vercel
+
+# Google OAuth / service account credential files — NEVER commit these
+*.json
+!package.json
+!package-lock.json
+!components.json
+!tsconfig.json
+
+# Local Claude / IDE settings
+.claude/
 
 # typescript
 *.tsbuildinfo
