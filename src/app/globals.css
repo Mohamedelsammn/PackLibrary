@@ -1,0 +1,184 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   INDUSTRIAL PRECISION DESIGN SYSTEM — DESIGN.md token mapping (Tailwind v4)
+───────────────────────────────────────────────────────────────────────────── */
+
+@theme inline {
+  /* Fonts */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Radius */
+  --radius-sm:  0.25rem;
+  --radius:     0.5rem;
+  --radius-md:  0.75rem;
+  --radius-lg:  1rem;
+  --radius-xl:  1.25rem;
+  --radius-2xl: 1.5rem;
+
+  /* Shadows */
+  --shadow-card:       0px 4px 20px rgba(0,0,0,0.04);
+  --shadow-card-hover: 0px 8px 32px rgba(0,0,0,0.08);
+
+  /* ── Semantic colour aliases (maps to CSS vars below) ── */
+  --color-background:    var(--background);
+  --color-foreground:    var(--foreground);
+  --color-card:          var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover:       var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary:       var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary:     var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted:         var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent:        var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive:   var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border:        var(--border);
+  --color-input:         var(--input);
+  --color-ring:          var(--ring);
+
+  /* ── Pack Library custom palette tokens ── */
+  --color-canvas:        var(--canvas);
+  --color-sidebar-bg:    var(--sidebar-bg);
+  --color-outline-variant: var(--outline-variant);
+  --color-surface-dim:   var(--surface-dim);
+  --color-surface-container: var(--surface-container);
+  --color-on-surface-variant: var(--on-surface-variant);
+}
+
+/* ─── Light-mode CSS variables ─── */
+:root {
+  /* Canvas & surfaces */
+  --background:        #fdf8f8;
+  --canvas:            #fdf8f8;
+  --foreground:        #1c1b1b;
+  --card:              #ffffff;
+  --card-foreground:   #1c1b1b;
+  --popover:           #ffffff;
+  --popover-foreground: #1c1b1b;
+
+  /* Sidebar */
+  --sidebar-bg:        #000000;
+
+  /* Primary — pure black */
+  --primary:           #000000;
+  --primary-foreground: #ffffff;
+
+  /* Secondary — warm grey */
+  --secondary:         #5e5f5a;
+  --secondary-foreground: #ffffff;
+
+  /* Muted */
+  --muted:             #f1edec;
+  --muted-foreground:  #444748;
+
+  /* Accent */
+  --accent:            #ebe7e6;
+  --accent-foreground: #1c1b1b;
+
+  /* Destructive */
+  --destructive:       #ba1a1a;
+  --destructive-foreground: #ffffff;
+
+  /* Borders & inputs */
+  --border:            #e5e2e1;
+  --input:             #e5e2e1;
+  --outline-variant:   #c4c7c7;
+  --surface-dim:       #ddd9d8;
+  --surface-container: #f1edec;
+  --on-surface-variant: #444748;
+
+  /* Focus ring */
+  --ring:              #747878;
+
+  /* Border radius base */
+  --radius: 0.5rem;
+}
+
+/* ─── Base layer ─── */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  html {
+    @apply h-full;
+  }
+  body {
+    @apply min-h-full;
+  }
+}
+
+/* ─── Typography utilities (from DESIGN.md) ─── */
+@layer utilities {
+  .text-display {
+    font-family: var(--font-sans);
+    font-size: 3rem;
+    font-weight: 600;
+    line-height: 3.5rem;
+    letter-spacing: -0.02em;
+  }
+  .text-headline-lg {
+    font-family: var(--font-sans);
+    font-size: 2rem;
+    font-weight: 600;
+    line-height: 2.5rem;
+    letter-spacing: -0.01em;
+  }
+  .text-headline-md {
+    font-family: var(--font-sans);
+    font-size: 1.25rem;
+    font-weight: 500;
+    line-height: 1.75rem;
+  }
+  .text-body-lg {
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5rem;
+  }
+  .text-body-md {
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 400;
+    line-height: 1.25rem;
+  }
+  .text-label-md {
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .text-technical {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    line-height: 1.125rem;
+  }
+}
+
+/* ─── Custom scrollbar ─── */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #ddd9d8 transparent;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
