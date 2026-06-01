@@ -99,9 +99,14 @@ function uploadToGoogleDrive(
 
 /**
  * Full pipeline for a single file:
- *   1. GET resumable session URI from /api/upload/init
- *   2. PUT file bytes directly to Google Drive
- *   3. POST to /api/upload/complete to set permissions + get public links
+ *   1. POST /api/upload/init  → get a Google Drive resumable session URI
+ *   2. PUT file bytes directly to Google Drive (no Vercel body limit)
+ *   3. POST /api/upload/complete → set permissions + get public links
+ *
+ * If step 2 throws a "Network error" (browser CORS on the Drive response),
+ * the bytes ARE on Drive — we just couldn't read the file ID from the response.
+ * In that case we fall back to POST /api/upload/recover which finds the file
+ * server-side by name and returns the same payload.
  */
 async function uploadFileDirect(
   file: File,
@@ -109,9 +114,10 @@ async function uploadFileDirect(
   packSlug: string,
   onProgress: (pct: number) => void
 ): Promise<UploadResult> {
-  const mimeType = file.type || "application/octet-stream";
+  const mimeType   = file.type || "application/octet-stream";
+  const assetType  = detectAssetType(mimeType);
 
-  // Step 1 — init session
+  // ── Step 1: create Drive resumable session ──────────────────────────────────
   const initRes = await fetch("/api/upload/init", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -121,34 +127,72 @@ async function uploadFileDirect(
       fileSize:  file.size,
       brandSlug,
       packSlug,
-      assetType: detectAssetType(mimeType),
+      assetType,
     }),
   });
 
   if (!initRes.ok) {
     const err = await initRes.json().catch(() => ({}));
-    throw new Error((err as { error?: { message?: string } })?.error?.message ?? "Failed to initialise upload");
+    throw new Error(
+      (err as { error?: { message?: string } })?.error?.message ?? "Failed to initialise upload"
+    );
   }
 
   const { data: initData } = await initRes.json() as { data: { uploadUrl: string } };
 
-  // Step 2 — upload directly to Drive (no Vercel body limit)
-  const driveId = await uploadToGoogleDrive(file, initData.uploadUrl, onProgress);
+  // ── Step 2: upload bytes directly to Google Drive ──────────────────────────
+  let driveId: string | null = null;
+  let uploadError: Error | null = null;
 
-  // Step 3 — finalise permissions + get public links
-  const completeRes = await fetch("/api/upload/complete", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ driveId }),
-  });
-
-  if (!completeRes.ok) {
-    const err = await completeRes.json().catch(() => ({}));
-    throw new Error((err as { error?: { message?: string } })?.error?.message ?? "Failed to finalise upload");
+  try {
+    driveId = await uploadToGoogleDrive(file, initData.uploadUrl, onProgress);
+  } catch (err) {
+    uploadError = err instanceof Error ? err : new Error("Upload failed");
   }
 
-  const { data } = await completeRes.json() as { data: UploadResult };
-  return data;
+  // ── Step 3a: normal completion ─────────────────────────────────────────────
+  if (driveId) {
+    const completeRes = await fetch("/api/upload/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ driveId }),
+    });
+
+    if (!completeRes.ok) {
+      const err = await completeRes.json().catch(() => ({}));
+      throw new Error(
+        (err as { error?: { message?: string } })?.error?.message ?? "Failed to finalise upload"
+      );
+    }
+
+    const { data } = await completeRes.json() as { data: UploadResult };
+    return data;
+  }
+
+  // ── Step 3b: CORS recovery ─────────────────────────────────────────────────
+  // The XHR threw a "Network error" — usually a CORS restriction on the Drive
+  // response. The bytes ARE on Drive; we just couldn't read the ID. Ask the
+  // server to find the file by name and complete the flow server-side.
+  if (uploadError?.message.includes("Network error") || uploadError?.message.includes("timed out")) {
+    onProgress(99); // hold at 99% while server verifies
+
+    const recoverRes = await fetch("/api/upload/recover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: file.name, mimeType, brandSlug, packSlug, assetType }),
+    });
+
+    if (recoverRes.ok) {
+      const { data } = await recoverRes.json() as { data: UploadResult };
+      onProgress(100);
+      return data;
+    }
+    // Recovery failed — file genuinely didn't arrive at Drive
+    throw new Error("Upload failed and recovery found no file. Please try again.");
+  }
+
+  // Any other error (HTTP error, invalid response, etc.) — rethrow as-is
+  throw uploadError ?? new Error("Upload failed");
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

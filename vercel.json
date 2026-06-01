@@ -2,6 +2,7 @@
   "functions": {
     "src/app/api/upload/init/route.ts":     { "maxDuration": 30  },
     "src/app/api/upload/complete/route.ts": { "maxDuration": 30  },
+    "src/app/api/upload/recover/route.ts":  { "maxDuration": 30  },
     "src/app/api/proxy/glb/**":             { "maxDuration": 60  },
     "src/app/api/download/**":              { "maxDuration": 60  },
     "src/app/api/auth/google/**":           { "maxDuration": 30  },
