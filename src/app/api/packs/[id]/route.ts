@@ -7,25 +7,28 @@ import { deleteFileFromDrive, deleteFolderByName } from "@/lib/google-drive/uplo
 export const runtime = "nodejs";
 
 const updatePackSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
+  name:         z.string().min(1).max(200).optional(),
   internalName: z.string().max(200).nullable().optional(),
-  format: z.string().min(1).max(100).optional(),
-  material: z.string().max(100).nullable().optional(),
-  description: z.string().max(2000).nullable().optional(),
-  heightMm: z.number().positive().max(500).optional(),
-  widthMm: z.number().positive().max(500).optional(),
-  depthMm: z.number().positive().max(500).optional(),
-  glbDriveId: z.string().nullable().optional(),
-  glbUrl: z.string().url().nullable().optional(),
+  format:       z.string().min(1).max(100).optional(),
+  material:     z.string().max(100).nullable().optional(),
+  description:  z.string().max(2000).nullable().optional(),
+  heightMm:     z.number().positive().max(500).optional(),
+  widthMm:      z.number().positive().max(500).optional(),
+  depthMm:      z.number().positive().max(500).optional(),
+  region:       z.string().max(100).nullable().optional(),
+  color:        z.string().max(100).nullable().optional(),
+  size:         z.string().max(100).nullable().optional(),
+  glbDriveId:     z.string().nullable().optional(),
+  glbUrl:         z.string().url().nullable().optional(),
   dielineDriveId: z.string().nullable().optional(),
-  dielineUrl: z.string().url().nullable().optional(),
-  thumbnailUrl: z.string().url().nullable().optional(),
+  dielineUrl:     z.string().url().nullable().optional(),
+  thumbnailUrl:   z.string().url().nullable().optional(),
   images: z
     .array(
       z.object({
         driveId: z.string(),
-        url: z.string().url(),
-        label: z.string().max(50).optional(),
+        url:     z.string().url(),
+        label:   z.string().max(100).optional(),
       })
     )
     .optional(),
@@ -85,9 +88,10 @@ export async function PATCH(
       ...(parsed.data.dielineUrl !== undefined && {
         dieline_url: parsed.data.dielineUrl,
       }),
-      ...(parsed.data.thumbnailUrl !== undefined && {
-        thumbnail_url: parsed.data.thumbnailUrl,
-      }),
+      ...(parsed.data.thumbnailUrl !== undefined && { thumbnail_url: parsed.data.thumbnailUrl }),
+      ...(parsed.data.region !== undefined && { region: parsed.data.region }),
+      ...(parsed.data.color  !== undefined && { color:  parsed.data.color }),
+      ...(parsed.data.size   !== undefined && { size:   parsed.data.size }),
     })
     .eq("id", id)
     .select()

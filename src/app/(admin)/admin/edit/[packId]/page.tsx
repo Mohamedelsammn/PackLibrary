@@ -38,6 +38,10 @@ export default async function EditPackPage({ params }: PageProps) {
     is_active: b.is_active,
   }));
 
+  // Pass the full PackWithImages (which includes pack_images) so AddPackForm
+  // can pre-populate the TwoDAssetsManager with existing images.
+  const initialData = pack; // type: PackWithImages — structurally compatible
+
   return (
     <AppShell>
       <Topbar showAddButton={false} />
@@ -53,7 +57,7 @@ export default async function EditPackPage({ params }: PageProps) {
             brandSlug={pack.brands.slug}
           />
         </div>
-        <AddPackForm brands={brands} initialData={pack} packId={packId} />
+        <AddPackForm brands={brands} initialData={initialData} packId={packId} />
       </div>
     </AppShell>
   );

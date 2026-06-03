@@ -37,7 +37,10 @@ function mapToPackDetails(data: PackWithImages): PackDetails {
     glb_url: data.glb_url,
     dieline_drive_id: data.dieline_drive_id,
     dieline_url: data.dieline_url,
-    brand: data.brands,
+    region: data.region,
+    color:  data.color,
+    size:   data.size,
+    brand:  data.brands,
     images: data.pack_images.sort((a, b) => a.sort_order - b.sort_order),
   };
 }

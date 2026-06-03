@@ -16,6 +16,9 @@ const createPackSchema = z.object({
   heightMm: z.number().positive().max(500),
   widthMm: z.number().positive().max(500),
   depthMm: z.number().positive().max(500),
+  region: z.string().max(100).optional(),
+  color:  z.string().max(100).optional(),
+  size:   z.string().max(100).optional(),
   glbDriveId: z.string().optional(),
   glbUrl: z.string().url().optional(),
   dielineDriveId: z.string().optional(),
@@ -26,7 +29,7 @@ const createPackSchema = z.object({
       z.object({
         driveId: z.string(),
         url: z.string().url(),
-        label: z.string().max(50).optional(),
+        label: z.string().max(100).optional(),
       })
     )
     .optional(),
@@ -55,21 +58,9 @@ export async function POST(req: Request) {
   }
 
   const {
-    brandId,
-    name,
-    internalName,
-    format,
-    material,
-    description,
-    heightMm,
-    widthMm,
-    depthMm,
-    glbDriveId,
-    glbUrl,
-    dielineDriveId,
-    dielineUrl,
-    thumbnailUrl,
-    images,
+    brandId, name, internalName, format, material, description,
+    heightMm, widthMm, depthMm, region, color, size,
+    glbDriveId, glbUrl, dielineDriveId, dielineUrl, thumbnailUrl, images,
   } = parsed.data;
 
   const supabase = await createSupabaseServiceClient();
@@ -86,13 +77,16 @@ export async function POST(req: Request) {
       material,
       description,
       height_mm: heightMm,
-      width_mm: widthMm,
-      depth_mm: depthMm,
-      glb_drive_id: glbDriveId,
-      glb_url: glbUrl,
+      width_mm:  widthMm,
+      depth_mm:  depthMm,
+      region:    region ?? null,
+      color:     color  ?? null,
+      size:      size   ?? null,
+      glb_drive_id:     glbDriveId,
+      glb_url:          glbUrl,
       dieline_drive_id: dielineDriveId,
-      dieline_url: dielineUrl,
-      thumbnail_url: thumbnailUrl,
+      dieline_url:      dielineUrl,
+      thumbnail_url:    thumbnailUrl,
     })
     .select()
     .single();

@@ -81,6 +81,23 @@ export function PackCard({ pack }: PackCardProps) {
           {pack.name}
         </h2>
 
+        {/* Color / Size / Region pills */}
+        {(pack.color || pack.size || pack.region) && (
+          <div className="flex flex-wrap gap-1.5">
+            {pack.size && (
+              <span style={pillStyle}>{pack.size}</span>
+            )}
+            {pack.color && (
+              <span style={pillStyle}>{pack.color}</span>
+            )}
+            {pack.region && (
+              <span style={{ ...pillStyle, backgroundColor: "#f0f0f0", color: "#555" }}>
+                {pack.region}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Dimensions */}
         <div
           className="grid grid-cols-3 gap-1 pt-3"
@@ -114,6 +131,7 @@ export function PackCard({ pack }: PackCardProps) {
         </div>
 
         {/* CTA */}
+
         <Link
           href={`/packs/${pack.id}`}
           className="block w-full text-center text-white text-sm font-medium py-2.5 px-4 rounded-lg transition-colors"
@@ -133,3 +151,15 @@ export function PackCard({ pack }: PackCardProps) {
     </article>
   );
 }
+
+const pillStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: "0.04em",
+  padding: "2px 7px",
+  borderRadius: 99,
+  backgroundColor: "#f5f3f1",
+  color: "#555",
+  border: "1px solid #e5e2e1",
+  whiteSpace: "nowrap",
+};

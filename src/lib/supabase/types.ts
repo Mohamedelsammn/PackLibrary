@@ -63,6 +63,9 @@ export interface Database {
           dieline_drive_id: string | null;
           dieline_url: string | null;
           thumbnail_url: string | null;
+          region: string | null;
+          color: string | null;
+          size: string | null;
           is_active: boolean;
           created_at: string;
           updated_at: string;
@@ -84,6 +87,9 @@ export interface Database {
           dieline_drive_id?: string | null;
           dieline_url?: string | null;
           thumbnail_url?: string | null;
+          region?: string | null;
+          color?: string | null;
+          size?: string | null;
           is_active?: boolean;
           created_at?: string;
           updated_at?: string;
@@ -105,6 +111,9 @@ export interface Database {
           dieline_drive_id?: string | null;
           dieline_url?: string | null;
           thumbnail_url?: string | null;
+          region?: string | null;
+          color?: string | null;
+          size?: string | null;
           is_active?: boolean;
           created_at?: string;
           updated_at?: string;

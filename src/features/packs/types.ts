@@ -9,6 +9,9 @@ export interface Pack {
   height_mm: number;
   width_mm: number;
   depth_mm: number;
+  region: string | null;
+  color: string | null;
+  size: string | null;
 }
 
 export interface PackImage {

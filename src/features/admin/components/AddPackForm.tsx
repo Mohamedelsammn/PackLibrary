@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Box, Info, Ruler, Camera, Save, Loader2, UploadCloud } from "lucide-react";
+import { Box, Info, Ruler, Save, Loader2, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,285 +17,215 @@ import {
 } from "@/components/ui/select";
 import { FileDropzone } from "./FileDropzone";
 import { DimensionInput } from "./DimensionInput";
+import { TwoDAssetsManager, newAssetEntry } from "./TwoDAssetsManager";
+import type { Asset2DEntry } from "./TwoDAssetsManager";
 import { addPackSchema } from "../schemas/add-pack.schema";
+import { REGIONS, COLORS, PACK_SIZES } from "@/features/search/constants";
 import type { Brand } from "@/features/brands/types";
-import type { PackRow } from "@/lib/supabase/types";
+import type { PackRow, PackImageRow } from "@/lib/supabase/types";
+
+// Accept either plain PackRow or PackRow + images (for edit mode)
+type InitialData = (PackRow & { pack_images?: PackImageRow[] }) | null | undefined;
 
 interface AddPackFormProps {
-  brands: Brand[];
-  initialData?: PackRow | null;
-  packId?: string;
+  brands:       Brand[];
+  initialData?: InitialData;
+  packId?:      string;
 }
 
 interface UploadResult {
-  driveId: string;
-  viewLink: string;
+  driveId:      string;
+  viewLink:     string;
   downloadLink: string;
 }
 
-// ── Per-file upload progress ──────────────────────────────────────────────────
-
 interface UploadState {
-  status: "idle" | "uploading" | "done" | "error";
-  progress: number;   // 0-100
-  error?: string;
+  status:    "idle" | "uploading" | "done" | "error";
+  progress:  number;
+  error?:    string;
 }
 
-// ── Direct upload helpers ─────────────────────────────────────────────────────
+// ── Upload helpers (reused from existing architecture) ────────────────────────
 
 function detectAssetType(mimeType: string): "glb" | "image" | "dieline" {
-  if (
-    mimeType === "model/gltf-binary" ||
-    mimeType === "model/gltf+json"   ||
-    mimeType === "model/vnd.fbx"     ||
-    mimeType === "application/octet-stream"
-  ) return "glb";
+  if (["model/gltf-binary","model/gltf+json","model/vnd.fbx","application/octet-stream"].includes(mimeType)) return "glb";
   if (["image/png","image/jpeg","image/webp"].includes(mimeType)) return "image";
   return "dieline";
 }
 
-/**
- * Uploads a single file directly to Google Drive using a resumable session URI.
- * Returns the Drive file ID.
- * Throws on failure so the caller can retry.
- */
-function uploadToGoogleDrive(
-  file: File,
-  uploadUrl: string,
-  onProgress: (pct: number) => void
-): Promise<string> {
+function uploadToGoogleDrive(file: File, uploadUrl: string, onProgress: (p: number) => void): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        onProgress(Math.min(99, Math.round((e.loaded / e.total) * 100)));
-      }
-    };
-
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.min(99, Math.round((e.loaded / e.total) * 100))); };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const json = JSON.parse(xhr.responseText) as { id?: string };
           if (!json.id) return reject(new Error("Google Drive did not return a file ID"));
-          onProgress(100);
-          resolve(json.id);
-        } catch {
-          reject(new Error("Invalid response from Google Drive"));
-        }
-      } else {
-        reject(new Error(`Upload failed: HTTP ${xhr.status}`));
-      }
+          onProgress(100); resolve(json.id);
+        } catch { reject(new Error("Invalid response from Google Drive")); }
+      } else { reject(new Error(`Upload failed: HTTP ${xhr.status}`)); }
     };
-
     xhr.onerror   = () => reject(new Error("Network error during upload"));
     xhr.ontimeout = () => reject(new Error("Upload timed out"));
-
     xhr.open("PUT", uploadUrl);
     xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
     xhr.send(file);
   });
 }
 
-/**
- * Full pipeline for a single file:
- *   1. POST /api/upload/init  → get a Google Drive resumable session URI
- *   2. PUT file bytes directly to Google Drive (no Vercel body limit)
- *   3. POST /api/upload/complete → set permissions + get public links
- *
- * If step 2 throws a "Network error" (browser CORS on the Drive response),
- * the bytes ARE on Drive — we just couldn't read the file ID from the response.
- * In that case we fall back to POST /api/upload/recover which finds the file
- * server-side by name and returns the same payload.
- */
-async function uploadFileDirect(
-  file: File,
-  brandSlug: string,
-  packSlug: string,
-  onProgress: (pct: number) => void
-): Promise<UploadResult> {
-  const mimeType   = file.type || "application/octet-stream";
-  const assetType  = detectAssetType(mimeType);
+async function uploadFileDirect(file: File, brandSlug: string, packSlug: string, onProgress: (p: number) => void): Promise<UploadResult> {
+  const mimeType  = file.type || "application/octet-stream";
+  const assetType = detectAssetType(mimeType);
 
-  // ── Step 1: create Drive resumable session ──────────────────────────────────
   const initRes = await fetch("/api/upload/init", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      filename:  file.name,
-      mimeType,
-      fileSize:  file.size,
-      brandSlug,
-      packSlug,
-      assetType,
-    }),
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: file.name, mimeType, fileSize: file.size, brandSlug, packSlug, assetType }),
   });
-
   if (!initRes.ok) {
     const err = await initRes.json().catch(() => ({}));
-    throw new Error(
-      (err as { error?: { message?: string } })?.error?.message ?? "Failed to initialise upload"
-    );
+    throw new Error((err as {error?:{message?:string}})?.error?.message ?? "Failed to initialise upload");
   }
-
   const { data: initData } = await initRes.json() as { data: { uploadUrl: string } };
 
-  // ── Step 2: upload bytes directly to Google Drive ──────────────────────────
   let driveId: string | null = null;
   let uploadError: Error | null = null;
+  try { driveId = await uploadToGoogleDrive(file, initData.uploadUrl, onProgress); }
+  catch (err) { uploadError = err instanceof Error ? err : new Error("Upload failed"); }
 
-  try {
-    driveId = await uploadToGoogleDrive(file, initData.uploadUrl, onProgress);
-  } catch (err) {
-    uploadError = err instanceof Error ? err : new Error("Upload failed");
-  }
-
-  // ── Step 3a: normal completion ─────────────────────────────────────────────
   if (driveId) {
     const completeRes = await fetch("/api/upload/complete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ driveId }),
     });
-
     if (!completeRes.ok) {
       const err = await completeRes.json().catch(() => ({}));
-      throw new Error(
-        (err as { error?: { message?: string } })?.error?.message ?? "Failed to finalise upload"
-      );
+      throw new Error((err as {error?:{message?:string}})?.error?.message ?? "Failed to finalise upload");
     }
-
     const { data } = await completeRes.json() as { data: UploadResult };
     return data;
   }
 
-  // ── Step 3b: CORS recovery ─────────────────────────────────────────────────
-  // The XHR threw a "Network error" — usually a CORS restriction on the Drive
-  // response. The bytes ARE on Drive; we just couldn't read the ID. Ask the
-  // server to find the file by name and complete the flow server-side.
   if (uploadError?.message.includes("Network error") || uploadError?.message.includes("timed out")) {
-    onProgress(99); // hold at 99% while server verifies
-
+    onProgress(99);
     const recoverRes = await fetch("/api/upload/recover", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filename: file.name, mimeType, brandSlug, packSlug, assetType }),
     });
-
     if (recoverRes.ok) {
       const { data } = await recoverRes.json() as { data: UploadResult };
-      onProgress(100);
-      return data;
+      onProgress(100); return data;
     }
-    // Recovery failed — file genuinely didn't arrive at Drive
     throw new Error("Upload failed and recovery found no file. Please try again.");
   }
-
-  // Any other error (HTTP error, invalid response, etc.) — rethrow as-is
   throw uploadError ?? new Error("Upload failed");
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function AddPackForm({ brands, initialData, packId }: AddPackFormProps) {
-  const router = useRouter();
-  const isEdit = !!packId;
+  const router  = useRouter();
+  const isEdit  = !!packId;
 
-  // Form fields
-  const [brandId,      setBrandId]      = useState(initialData?.brand_id  ?? "");
-  const [format,       setFormat]       = useState(initialData?.format     ?? "");
-  const [name,         setName]         = useState(initialData?.name       ?? "");
-  const [internalName, setInternalName] = useState(initialData?.internal_name ?? "");
-  const [material,     setMaterial]     = useState(initialData?.material   ?? "");
-  const [description,  setDescription]  = useState(initialData?.description ?? "");
-  const [heightMm,     setHeightMm]     = useState(initialData?.height_mm?.toString() ?? "84");
-  const [widthMm,      setWidthMm]      = useState(initialData?.width_mm?.toString()  ?? "55");
-  const [depthMm,      setDepthMm]      = useState(initialData?.depth_mm?.toString()  ?? "22");
+  // ── General info ──────────────────────────────────────────────────────────
+  const [brandId,      setBrandId]      = useState(initialData?.brand_id       ?? "");
+  const [format,       setFormat]       = useState(initialData?.format          ?? "");
+  const [name,         setName]         = useState(initialData?.name            ?? "");
+  const [internalName, setInternalName] = useState(initialData?.internal_name   ?? "");
+  const [material,     setMaterial]     = useState(initialData?.material        ?? "");
+  const [description,  setDescription]  = useState(initialData?.description     ?? "");
+  const [region,       setRegion]       = useState(initialData?.region          ?? "");
+  const [color,        setColor]        = useState(initialData?.color           ?? "");
+  const [size,         setSize]         = useState(initialData?.size            ?? "");
 
-  // File picks
+  // ── Dimensions ────────────────────────────────────────────────────────────
+  const [heightMm, setHeightMm] = useState(initialData?.height_mm?.toString() ?? "84");
+  const [widthMm,  setWidthMm]  = useState(initialData?.width_mm?.toString()  ?? "55");
+  const [depthMm,  setDepthMm]  = useState(initialData?.depth_mm?.toString()  ?? "22");
+
+  // ── 3D + dieline files ────────────────────────────────────────────────────
   const [glbFile,       setGlbFile]       = useState<File | null>(null);
   const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
-  const [productImages, setProductImages] = useState<File[]>([]);
   const [dielineFile,   setDielineFile]   = useState<File | null>(null);
 
-  // Per-file upload progress
-  const [glbUpload,       setGlbUpload]       = useState<UploadState>({ status: "idle", progress: 0 });
-  const [thumbUpload,     setThumbUpload]     = useState<UploadState>({ status: "idle", progress: 0 });
-  const [imagesUpload,    setImagesUpload]    = useState<UploadState>({ status: "idle", progress: 0 });
-  const [dielineUpload,   setDielineUpload]   = useState<UploadState>({ status: "idle", progress: 0 });
+  const [glbUpload,     setGlbUpload]     = useState<UploadState>({ status: "idle", progress: 0 });
+  const [thumbUpload,   setThumbUpload]   = useState<UploadState>({ status: "idle", progress: 0 });
+  const [dielineUpload, setDielineUpload] = useState<UploadState>({ status: "idle", progress: 0 });
 
-  const [errors,      setErrors]      = useState<Record<string, string>>({});
+  // ── 2D assets (TwoDAssetsManager) ─────────────────────────────────────────
+  const [assets2d, setAssets2d] = useState<Asset2DEntry[]>(() => {
+    const existing = initialData?.pack_images ?? [];
+    if (existing.length === 0) return [];
+    return existing
+      .slice()
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((img) =>
+        newAssetEntry({
+          existingId:       img.id,
+          name:             img.label ?? "",
+          existingUrl:      img.url,
+          existingDriveId:  img.drive_id,
+        })
+      );
+  });
+
+  const [errors,       setErrors]       = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectedBrand = brands.find((b) => b.id === brandId);
 
+  // ── Validation ────────────────────────────────────────────────────────────
   function validate() {
     const result = addPackSchema.safeParse({
-      brandId,
-      format,
-      name,
+      brandId, format, name,
       internalName: internalName || undefined,
       material:     material     || undefined,
       description:  description  || undefined,
       heightMm: parseFloat(heightMm),
       widthMm:  parseFloat(widthMm),
       depthMm:  parseFloat(depthMm),
+      region: (region || undefined) as typeof REGIONS[number] | undefined,
+      color:  (color  || undefined) as typeof COLORS[number]  | undefined,
+      size:   (size   || undefined) as typeof PACK_SIZES[number] | undefined,
     });
-
     if (!result.success) {
-      const fieldErrors: Record<string, string> = {};
-      result.error.errors.forEach((e) => {
-        const field = e.path[0]?.toString() ?? "form";
-        fieldErrors[field] = e.message;
-      });
-      setErrors(fieldErrors);
-      return false;
+      const fe: Record<string, string> = {};
+      result.error.errors.forEach((e) => { fe[e.path[0]?.toString() ?? "form"] = e.message; });
+      setErrors(fe); return false;
     }
-    setErrors({});
-    return true;
+    setErrors({}); return true;
   }
 
-  /**
-   * Upload a file with retry support.
-   * Retries up to `maxRetries` times on failure before throwing.
-   */
-  const uploadWithRetry = useCallback(
-    async (
-      file: File,
-      brandSlug: string,
-      packSlug: string,
-      setUpload: React.Dispatch<React.SetStateAction<UploadState>>,
-      maxRetries = 2
-    ): Promise<UploadResult> => {
-      let lastError: Error = new Error("Unknown error");
-
-      for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
+  // ── Upload with retry ─────────────────────────────────────────────────────
+  const uploadWithRetry = useCallback(async (
+    file: File,
+    brandSlug: string,
+    packSlug: string,
+    setUpload: React.Dispatch<React.SetStateAction<UploadState>>,
+    maxRetries = 2
+  ): Promise<UploadResult> => {
+    let lastError: Error = new Error("Unknown error");
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        setUpload({ status: "uploading", progress: 0 });
+        const result = await uploadFileDirect(file, brandSlug, packSlug, (pct) =>
+          setUpload((p) => ({ ...p, progress: pct }))
+        );
+        setUpload({ status: "done", progress: 100 });
+        return result;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error("Upload failed");
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
           setUpload({ status: "uploading", progress: 0 });
-          const result = await uploadFileDirect(
-            file,
-            brandSlug,
-            packSlug,
-            (pct) => setUpload((prev) => ({ ...prev, progress: pct }))
-          );
-          setUpload({ status: "done", progress: 100 });
-          return result;
-        } catch (err) {
-          lastError = err instanceof Error ? err : new Error("Upload failed");
-          if (attempt < maxRetries) {
-            // Brief pause before retry
-            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-            setUpload({ status: "uploading", progress: 0 });
-          }
         }
       }
+    }
+    setUpload({ status: "error", progress: 0, error: lastError.message });
+    throw lastError;
+  }, []);
 
-      setUpload({ status: "error", progress: 0, error: lastError.message });
-      throw lastError;
-    },
-    []
-  );
-
+  // ── Submit ────────────────────────────────────────────────────────────────
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!validate()) return;
@@ -310,88 +240,88 @@ export function AddPackForm({ brands, initialData, packId }: AddPackFormProps) {
       let thumbnailUrl:  string | undefined;
       let dielineDriveId: string | undefined;
       let dielineUrl:    string | undefined;
-      const uploadedImages: { driveId: string; url: string; label?: string }[] = [];
 
-      // Upload files concurrently where possible (glb + thumbnail in parallel)
-      const uploadTasks: Promise<void>[] = [];
+      // ── GLB + thumbnail + dieline concurrently ──────────────────────────
+      const coreTasks: Promise<void>[] = [];
 
       if (glbFile) {
-        uploadTasks.push(
-          uploadWithRetry(glbFile, brandSlug, packSlug, setGlbUpload).then((r) => {
-            glbDriveId = r.driveId;
-            glbUrl     = r.viewLink;
-          })
-        );
+        coreTasks.push(uploadWithRetry(glbFile, brandSlug, packSlug, setGlbUpload).then((r) => {
+          glbDriveId = r.driveId; glbUrl = r.viewLink;
+        }));
       }
-
       if (thumbnailFile) {
-        uploadTasks.push(
-          uploadWithRetry(thumbnailFile, brandSlug, packSlug, setThumbUpload).then((r) => {
-            thumbnailUrl = `https://lh3.googleusercontent.com/d/${r.driveId}`;
-          })
-        );
+        coreTasks.push(uploadWithRetry(thumbnailFile, brandSlug, packSlug, setThumbUpload).then((r) => {
+          thumbnailUrl = `https://lh3.googleusercontent.com/d/${r.driveId}`;
+        }));
       }
-
       if (dielineFile) {
-        uploadTasks.push(
-          uploadWithRetry(dielineFile, brandSlug, packSlug, setDielineUpload).then((r) => {
-            dielineDriveId = r.driveId;
-            dielineUrl     = r.viewLink;
-          })
-        );
+        coreTasks.push(uploadWithRetry(dielineFile, brandSlug, packSlug, setDielineUpload).then((r) => {
+          dielineDriveId = r.driveId; dielineUrl = r.viewLink;
+        }));
       }
+      await Promise.all(coreTasks);
 
-      // Wait for GLB + thumbnail + dieline concurrently
-      await Promise.all(uploadTasks);
+      // ── 2D assets: upload new ones ────────────────────────────────────────
+      const newAssets = assets2d.filter((a) => a.file && !a.existingId && !a.markedForDeletion);
+      const uploadedImages: { driveId: string; url: string; label?: string }[] = [];
 
-      // Product images sequentially (label order matters)
-      if (productImages.length > 0) {
-        const labels = ["Front", "Back", "Side", "Perspective"];
-        for (let i = 0; i < productImages.length; i++) {
-          const r = await uploadWithRetry(
-            productImages[i],
+      for (const asset of newAssets) {
+        // Update this asset's progress in the list
+        const setProgress = (patch: Partial<Asset2DEntry>) =>
+          setAssets2d((prev) => prev.map((a) => a.tempId === asset.tempId ? { ...a, ...patch } : a));
+
+        setProgress({ uploadStatus: "uploading", uploadProgress: 0 });
+        try {
+          const result = await uploadFileDirect(
+            asset.file!,
             brandSlug,
             packSlug,
-            setImagesUpload
+            (pct) => setProgress({ uploadProgress: pct })
           );
+          setProgress({ uploadStatus: "done", uploadProgress: 100 });
           uploadedImages.push({
-            driveId: r.driveId,
-            url:     `https://lh3.googleusercontent.com/d/${r.driveId}`,
-            label:   labels[i] ?? `View ${i + 1}`,
+            driveId: result.driveId,
+            url:     `https://lh3.googleusercontent.com/d/${result.driveId}`,
+            label:   asset.name || undefined,
           });
+        } catch (err) {
+          setProgress({ uploadStatus: "error", uploadProgress: 0 });
+          throw err;
         }
       }
 
+      // ── 2D assets: delete removed existing ones ────────────────────────────
+      const toDelete = assets2d.filter((a) => a.markedForDeletion && a.existingId);
+      await Promise.allSettled(
+        toDelete.map((a) => fetch(`/api/pack-images/${a.existingId}`, { method: "DELETE" }))
+      );
+
+      // ── Save pack ─────────────────────────────────────────────────────────
       const payload = {
-        brandId,
-        name,
+        brandId, name,
         internalName: internalName || undefined,
         format,
-        material:     material     || undefined,
-        description:  description  || undefined,
+        material:    material    || undefined,
+        description: description || undefined,
         heightMm: parseFloat(heightMm),
         widthMm:  parseFloat(widthMm),
         depthMm:  parseFloat(depthMm),
-        glbDriveId,
-        glbUrl,
-        thumbnailUrl,
-        dielineDriveId,
-        dielineUrl,
+        region: region || undefined,
+        color:  color  || undefined,
+        size:   size   || undefined,
+        glbDriveId, glbUrl, thumbnailUrl, dielineDriveId, dielineUrl,
         images: uploadedImages,
       };
 
-      const url    = isEdit ? `/api/packs/${packId}` : "/api/packs";
-      const method = isEdit ? "PATCH" : "POST";
-
-      const res = await fetch(url, {
-        method,
+      const res = await fetch(isEdit ? `/api/packs/${packId}` : "/api/packs", {
+        method:  isEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body:    JSON.stringify(payload),
       });
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error((err as { error?: { message?: string } })?.error?.message ?? "Save failed");
+        throw new Error((err as {error?:{message?:string}})?.error?.message ?? "Save failed");
       }
 
       const json = await res.json() as { data: { id: string } };
@@ -404,15 +334,15 @@ export function AddPackForm({ brands, initialData, packId }: AddPackFormProps) {
     }
   }
 
-  const isUploading =
-    glbUpload.status     === "uploading" ||
-    thumbUpload.status   === "uploading" ||
-    imagesUpload.status  === "uploading" ||
-    dielineUpload.status === "uploading";
+  const anyUploading =
+    glbUpload.status === "uploading" || thumbUpload.status === "uploading" || dielineUpload.status === "uploading" ||
+    assets2d.some((a) => a.uploadStatus === "uploading");
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
-      {/* General Information */}
+
+      {/* ── General Information ───────────────────────────────────────────── */}
       <section className="bg-card rounded-xl border border-border p-6 space-y-5">
         <div className="flex items-center gap-2 mb-1">
           <Info className="w-4 h-4 text-muted-foreground" />
@@ -420,6 +350,7 @@ export function AddPackForm({ brands, initialData, packId }: AddPackFormProps) {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Brand */}
           <div className="space-y-1.5">
             <Label htmlFor="brand">Brand</Label>
             <Select value={brandId} onValueChange={(v) => setBrandId(v ?? "")}>
@@ -427,73 +358,92 @@ export function AddPackForm({ brands, initialData, packId }: AddPackFormProps) {
                 <SelectValue placeholder="Select brand…" />
               </SelectTrigger>
               <SelectContent>
-                {brands.map((b) => (
-                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                ))}
+                {brands.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
               </SelectContent>
             </Select>
             {errors.brandId && <p className="text-xs text-destructive">{errors.brandId}</p>}
           </div>
 
+          {/* Format */}
           <div className="space-y-1.5">
             <Label htmlFor="format">Pack Type / Format</Label>
-            <Input
-              id="format"
-              placeholder="e.g., King Size Box, Nano Slim"
-              value={format}
-              onChange={(e) => setFormat(e.target.value)}
-              className={errors.format ? "border-destructive" : ""}
-            />
+            <Input id="format" placeholder="e.g., King Size Box, Nano Slim" value={format}
+              onChange={(e) => setFormat(e.target.value)} className={errors.format ? "border-destructive" : ""} />
             {errors.format && <p className="text-xs text-destructive">{errors.format}</p>}
           </div>
         </div>
 
+        {/* Name */}
         <div className="space-y-1.5">
-          <Label htmlFor="name">Pack Internal Name</Label>
-          <Input
-            id="name"
-            placeholder="Enter internal designation"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className={errors.name ? "border-destructive" : ""}
-          />
+          <Label htmlFor="name">Pack Name</Label>
+          <Input id="name" placeholder="Enter pack name" value={name}
+            onChange={(e) => setName(e.target.value)} className={errors.name ? "border-destructive" : ""} />
           {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Material */}
           <div className="space-y-1.5">
             <Label htmlFor="material">Material</Label>
-            <Input
-              id="material"
-              placeholder="e.g., Cardboard"
-              value={material}
-              onChange={(e) => setMaterial(e.target.value)}
-            />
+            <Input id="material" placeholder="e.g., Cardboard" value={material}
+              onChange={(e) => setMaterial(e.target.value)} />
           </div>
+          {/* Internal name */}
           <div className="space-y-1.5">
             <Label htmlFor="internalName">Internal Designation</Label>
-            <Input
-              id="internalName"
-              placeholder="Optional internal SKU"
-              value={internalName}
-              onChange={(e) => setInternalName(e.target.value)}
-            />
+            <Input id="internalName" placeholder="Optional internal SKU" value={internalName}
+              onChange={(e) => setInternalName(e.target.value)} />
           </div>
         </div>
 
+        {/* Region / Color / Size */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="space-y-1.5">
+            <Label htmlFor="region">Region</Label>
+            <Select value={region} onValueChange={(v) => setRegion(v ?? "")}>
+              <SelectTrigger id="region">
+                <SelectValue placeholder="Select region…" />
+              </SelectTrigger>
+              <SelectContent>
+                {REGIONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="color">Color</Label>
+            <Select value={color} onValueChange={(v) => setColor(v ?? "")}>
+              <SelectTrigger id="color">
+                <SelectValue placeholder="Select color…" />
+              </SelectTrigger>
+              <SelectContent>
+                {COLORS.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="size">Size</Label>
+            <Select value={size} onValueChange={(v) => setSize(v ?? "")}>
+              <SelectTrigger id="size">
+                <SelectValue placeholder="Select size…" />
+              </SelectTrigger>
+              <SelectContent>
+                {PACK_SIZES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Description */}
         <div className="space-y-1.5">
           <Label htmlFor="description">Description / Notes</Label>
-          <Textarea
-            id="description"
-            placeholder="Additional details, edge case notes…"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-          />
+          <Textarea id="description" placeholder="Additional details…" value={description}
+            onChange={(e) => setDescription(e.target.value)} rows={3} />
         </div>
       </section>
 
-      {/* Technical Specifications */}
+      {/* ── Technical Specifications ──────────────────────────────────────── */}
       <section className="bg-card rounded-xl border border-border p-6 space-y-5">
         <div className="flex items-center gap-2 mb-1">
           <Ruler className="w-4 h-4 text-muted-foreground" />
@@ -508,109 +458,71 @@ export function AddPackForm({ brands, initialData, packId }: AddPackFormProps) {
         </div>
       </section>
 
-      {/* Assets */}
+      {/* ── 3D Asset ─────────────────────────────────────────────────────── */}
       <section className="bg-card rounded-xl border border-border p-6 space-y-5">
         <div className="flex items-center gap-2 mb-1">
-          <Camera className="w-4 h-4 text-muted-foreground" />
-          <h2 className="font-semibold text-base">Assets</h2>
+          <Box className="w-4 h-4 text-muted-foreground" />
+          <h2 className="font-semibold text-base">3D Asset</h2>
           <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
             <UploadCloud className="w-3.5 h-3.5" />
             Direct upload — no file size limit
           </span>
         </div>
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* 3D Asset */}
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">3D Asset</p>
-            <FileDropzone
-              label="Drag & Drop 3D Model"
-              sublabel="GLB / GLTF / FBX — any size supported"
-              icon={<Box className="w-6 h-6" />}
-              accept={{
-                "model/gltf-binary":         [".glb"],
-                "model/gltf+json":           [".gltf"],
-                "model/vnd.fbx":             [".fbx"],
-                "application/octet-stream":  [".fbx", ".glb"],
-              }}
-              maxSize={500 * 1024 * 1024}
-              value={glbFile}
-              onChange={setGlbFile}
-              uploadState={glbUpload}
-            />
-          </div>
-
-          {/* 2D Assets */}
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">2D Assets</p>
-            <div className="space-y-3">
-              <FileDropzone
-                compact
-                label="Thumbnail Image"
-                sublabel="Primary library view (PNG/JPG/WEBP)"
-                accept={{
-                  "image/png":  [".png"],
-                  "image/jpeg": [".jpg", ".jpeg"],
-                  "image/webp": [".webp"],
-                }}
-                maxSize={50 * 1024 * 1024}
-                value={thumbnailFile}
-                onChange={setThumbnailFile}
-                uploadState={thumbUpload}
-              />
-              <FileDropzone
-                compact
-                label="Product Images"
-                sublabel="PNG/JPG/WEBP — multiple views"
-                accept={{
-                  "image/png":  [".png"],
-                  "image/jpeg": [".jpg", ".jpeg"],
-                  "image/webp": [".webp"],
-                }}
-                maxSize={50 * 1024 * 1024}
-                value={productImages[0] ?? null}
-                onChange={(f) => { if (f) setProductImages([f]); else setProductImages([]); }}
-                uploadState={imagesUpload}
-              />
-              <FileDropzone
-                compact
-                label="Dieline / Blueprint"
-                sublabel="PDF or SVG"
-                accept={{
-                  "application/pdf": [".pdf"],
-                  "image/svg+xml":   [".svg"],
-                }}
-                maxSize={50 * 1024 * 1024}
-                value={dielineFile}
-                onChange={setDielineFile}
-                uploadState={dielineUpload}
-              />
-            </div>
+          <FileDropzone
+            label="Drag & Drop 3D Model"
+            sublabel="GLB / GLTF / FBX — any size supported"
+            icon={<Box className="w-6 h-6" />}
+            accept={{ "model/gltf-binary": [".glb"], "model/gltf+json": [".gltf"], "model/vnd.fbx": [".fbx"], "application/octet-stream": [".fbx",".glb"] }}
+            maxSize={500 * 1024 * 1024}
+            value={glbFile}
+            onChange={setGlbFile}
+            uploadState={glbUpload}
+          />
+          <div className="space-y-3">
+            <FileDropzone compact label="Thumbnail Image" sublabel="Primary library view (PNG/JPG/WEBP)"
+              accept={{ "image/png": [".png"], "image/jpeg": [".jpg",".jpeg"], "image/webp": [".webp"] }}
+              maxSize={50 * 1024 * 1024} value={thumbnailFile} onChange={setThumbnailFile} uploadState={thumbUpload} />
+            <FileDropzone compact label="Dieline / Blueprint" sublabel="PDF or SVG"
+              accept={{ "application/pdf": [".pdf"], "image/svg+xml": [".svg"] }}
+              maxSize={50 * 1024 * 1024} value={dielineFile} onChange={setDielineFile} uploadState={dielineUpload} />
           </div>
         </div>
       </section>
 
-      {/* Actions */}
+      {/* ── 2D Assets ────────────────────────────────────────────────────── */}
+      <section className="bg-card rounded-xl border border-border p-6 space-y-4">
+        <div className="flex items-center justify-between mb-1">
+          <div>
+            <h2 className="font-semibold text-base">2D Assets</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Artwork, flat layouts, reference images — unlimited assets
+            </p>
+          </div>
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <UploadCloud className="w-3.5 h-3.5" />
+            Direct upload
+          </span>
+        </div>
+        <TwoDAssetsManager
+          assets={assets2d}
+          onChange={setAssets2d}
+          allowDeleteExisting
+        />
+      </section>
+
+      {/* ── Actions ──────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-end gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => router.back()}
-          disabled={isSubmitting}
-        >
+        <Button type="button" variant="outline" onClick={() => router.back()} disabled={isSubmitting}>
           Cancel
         </Button>
-        <Button type="submit" className="gap-2" disabled={isSubmitting || isUploading}>
-          {isSubmitting || isUploading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Save className="w-4 h-4" />
-          )}
+        <Button type="submit" className="gap-2" disabled={isSubmitting || anyUploading}>
+          {isSubmitting || anyUploading
+            ? <Loader2 className="w-4 h-4 animate-spin" />
+            : <Save className="w-4 h-4" />}
           {isSubmitting
-            ? isUploading ? "Uploading…" : "Saving…"
-            : isEdit
-            ? "Update Pack"
-            : "Save Asset"}
+            ? anyUploading ? "Uploading…" : "Saving…"
+            : isEdit ? "Update Pack" : "Save Asset"}
         </Button>
       </div>
     </form>

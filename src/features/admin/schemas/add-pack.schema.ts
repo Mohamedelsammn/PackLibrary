@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { REGIONS, COLORS, PACK_SIZES } from "@/features/search/constants";
 
 export const addPackSchema = z.object({
   brandId: z.string().uuid("Please select a brand"),
@@ -19,6 +20,9 @@ export const addPackSchema = z.object({
     .number({ invalid_type_error: "Depth must be a number" })
     .positive("Depth must be positive")
     .max(500),
+  region: z.enum(REGIONS).optional(),
+  color: z.enum(COLORS).optional(),
+  size: z.enum(PACK_SIZES).optional(),
 });
 
 export type AddPackFormValues = z.infer<typeof addPackSchema>;
