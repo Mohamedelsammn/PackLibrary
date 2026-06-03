@@ -24,11 +24,11 @@ export function Sidebar({ activeBrandSlug }: SidebarProps) {
           </svg>
         </div>
         <div className="flex flex-col min-w-0">
-          <span className="font-semibold text-sm text-white leading-tight truncate">
-            Pack Library
+          <span className="font-bold text-base text-white leading-tight truncate">
+            Imperial Brands
           </span>
           <span className="text-xs text-white/40 leading-tight truncate">
-            Imperial Brands
+            Pack Library
           </span>
         </div>
       </div>

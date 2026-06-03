@@ -11,28 +11,24 @@ interface FilterBarProps {
   brands?: Pick<BrandRow, "slug" | "name">[];
   /** Active filter values (controlled by URL params) */
   activeFilters: {
-    brand?: string;
+    brand?:  string;
     region?: string;
-    color?: string;
-    size?: string;
+    color?:  string;
+    size?:   string;
   };
   /** Base path for URL updates — defaults to "/" */
   basePath?: string;
 }
 
 export function FilterBar({ brands, activeFilters, basePath = "/" }: FilterBarProps) {
-  const router = useRouter();
+  const router       = useRouter();
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
 
   const updateFilter = useCallback(
     (key: string, value: string | null) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (value) {
-        params.set(key, value);
-      } else {
-        params.delete(key);
-      }
+      if (value) { params.set(key, value); } else { params.delete(key); }
       const qs = params.toString();
       startTransition(() => {
         router.replace(`${basePath}${qs ? `?${qs}` : ""}`, { scroll: false });
@@ -42,29 +38,29 @@ export function FilterBar({ brands, activeFilters, basePath = "/" }: FilterBarPr
   );
 
   const clearAll = useCallback(() => {
-    startTransition(() => {
-      router.replace(basePath, { scroll: false });
-    });
+    startTransition(() => { router.replace(basePath, { scroll: false }); });
   }, [router, basePath]);
 
   const hasActiveFilters = Object.values(activeFilters).some(Boolean);
+  const totalDropdowns   = (brands ? 1 : 0) + 3; // brand? + region + color + size
 
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 10,
+        gap: 8,
         flexWrap: "wrap",
-        padding: "12px 24px",
+        padding: "10px 24px",
         borderBottom: "1px solid #e5e2e1",
         backgroundColor: "#fdf8f8",
         position: "sticky",
-        top: 56, // below the 56px topbar
+        top: 56,       // sits flush below the 56px topbar
         zIndex: 20,
+        minHeight: 54, // prevents layout shift when "Clear all" appears/disappears
       }}
     >
-      {/* Brand filter — only when brands are provided */}
+      {/* Brand — only on the global "All" page */}
       {brands && brands.length > 0 && (
         <FilterDropdown
           label="Brand"
@@ -99,50 +95,39 @@ export function FilterBar({ brands, activeFilters, basePath = "/" }: FilterBarPr
         isPending={isPending}
       />
 
-      {/* Clear all */}
-      {hasActiveFilters && (
-        <button
-          onClick={clearAll}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 5,
-            height: 34,
-            paddingLeft: 12,
-            paddingRight: 12,
-            borderRadius: 8,
-            border: "1px solid #e5e2e1",
-            backgroundColor: "transparent",
-            color: "#747878",
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: "pointer",
-            transition: "all 0.15s",
-            whiteSpace: "nowrap",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = "#f5f3f1";
-            e.currentTarget.style.color = "#1c1b1b";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = "transparent";
-            e.currentTarget.style.color = "#747878";
-          }}
-        >
-          <X style={{ width: 12, height: 12 }} />
-          Clear all
-        </button>
-      )}
+      {/* Clear all — fades in only when a filter is active */}
+      <div style={{ width: hasActiveFilters ? "auto" : 0, overflow: "hidden", transition: "width 0.15s" }}>
+        {hasActiveFilters && (
+          <button
+            onClick={clearAll}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              height: 34,
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 8,
+              border: "1px solid #e5e2e1",
+              backgroundColor: "transparent",
+              color: "#747878",
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#f5f3f1"; e.currentTarget.style.color = "#1c1b1b"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#747878"; }}
+          >
+            <X style={{ width: 12, height: 12 }} />
+            Clear all
+          </button>
+        )}
+      </div>
 
+      {/* Pending indicator — pushed to the right */}
       {isPending && (
-        <span
-          style={{
-            marginLeft: "auto",
-            fontSize: 12,
-            color: "#747878",
-            fontStyle: "italic",
-          }}
-        >
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#a0a0a0", fontStyle: "italic" }}>
           Filtering…
         </span>
       )}
@@ -150,18 +135,15 @@ export function FilterBar({ brands, activeFilters, basePath = "/" }: FilterBarPr
   );
 }
 
-// ── Reusable single dropdown ──────────────────────────────────────────────────
+// ── Single dropdown ───────────────────────────────────────────────────────────
 
-interface DropdownOption {
-  value: string;
-  label: string;
-}
+interface DropdownOption { value: string; label: string; }
 
 interface FilterDropdownProps {
-  label: string;
-  value: string;
-  options: DropdownOption[];
-  onChange: (value: string | null) => void;
+  label:     string;
+  value:     string;
+  options:   DropdownOption[];
+  onChange:  (value: string | null) => void;
   isPending: boolean;
 }
 
@@ -169,7 +151,7 @@ function FilterDropdown({ label, value, options, onChange, isPending }: FilterDr
   const isActive = !!value;
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", flexShrink: 0 }}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value || null)}
@@ -179,7 +161,7 @@ function FilterDropdown({ label, value, options, onChange, isPending }: FilterDr
           appearance: "none",
           height: 34,
           paddingLeft: 12,
-          paddingRight: 30,
+          paddingRight: 32,
           borderRadius: 8,
           border: `1.5px solid ${isActive ? "#1c1b1b" : "#e5e2e1"}`,
           backgroundColor: isActive ? "#1c1b1b" : "#ffffff",
@@ -188,20 +170,17 @@ function FilterDropdown({ label, value, options, onChange, isPending }: FilterDr
           fontWeight: 500,
           cursor: isPending ? "wait" : "pointer",
           outline: "none",
-          transition: "all 0.15s",
+          transition: "border-color 0.15s, background-color 0.15s, color 0.15s",
           fontFamily: "inherit",
-          minWidth: 90,
+          width: 120,     // fixed width — all dropdowns uniform
         }}
       >
         <option value="">{label}</option>
         {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
         ))}
       </select>
 
-      {/* Custom chevron icon */}
       <div
         style={{
           position: "absolute",
@@ -209,7 +188,7 @@ function FilterDropdown({ label, value, options, onChange, isPending }: FilterDr
           top: "50%",
           transform: "translateY(-50%)",
           pointerEvents: "none",
-          color: isActive ? "rgba(255,255,255,0.8)" : "#747878",
+          color: isActive ? "rgba(255,255,255,0.7)" : "#9ca3af",
           display: "flex",
         }}
       >
