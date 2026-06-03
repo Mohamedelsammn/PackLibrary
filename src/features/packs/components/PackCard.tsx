@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { PackBadge } from "./PackBadge";
+import { HighlightText } from "@/features/search/components/HighlightText";
 import type { PackListRow } from "@/lib/supabase/queries/packs";
 
 const PackCardViewer = dynamic(
@@ -16,9 +17,10 @@ const PackCardViewer = dynamic(
 
 interface PackCardProps {
   pack: PackListRow;
+  searchQuery?: string;
 }
 
-export function PackCard({ pack }: PackCardProps) {
+export function PackCard({ pack, searchQuery = "" }: PackCardProps) {
   const hasGlb = !!pack.glb_drive_id;
 
   return (
@@ -77,22 +79,27 @@ export function PackCard({ pack }: PackCardProps) {
 
       {/* ── Card body ── */}
       <div className="p-5 flex flex-col gap-3">
+        {/* Pack name with search highlighting */}
         <h2 className="text-lg font-semibold text-[#1c1b1b] leading-snug">
-          {pack.name}
+          <HighlightText text={pack.name} query={searchQuery} />
         </h2>
 
-        {/* Color / Size / Region pills */}
+        {/* Color / Size / Region pills with highlighting */}
         {(pack.color || pack.size || pack.region) && (
           <div className="flex flex-wrap gap-1.5">
             {pack.size && (
-              <span style={pillStyle}>{pack.size}</span>
+              <span style={pillStyle}>
+                <HighlightText text={pack.size} query={searchQuery} />
+              </span>
             )}
             {pack.color && (
-              <span style={pillStyle}>{pack.color}</span>
+              <span style={pillStyle}>
+                <HighlightText text={pack.color} query={searchQuery} />
+              </span>
             )}
             {pack.region && (
               <span style={{ ...pillStyle, backgroundColor: "#f0f0f0", color: "#555" }}>
-                {pack.region}
+                <HighlightText text={pack.region} query={searchQuery} />
               </span>
             )}
           </div>
@@ -105,8 +112,8 @@ export function PackCard({ pack }: PackCardProps) {
         >
           {[
             { label: "HEIGHT", value: pack.height_mm },
-            { label: "WIDTH", value: pack.width_mm },
-            { label: "DEPTH", value: pack.depth_mm },
+            { label: "WIDTH",  value: pack.width_mm  },
+            { label: "DEPTH",  value: pack.depth_mm  },
           ].map(({ label, value }) => (
             <div key={label} className="flex flex-col items-center gap-0.5">
               <span
@@ -122,27 +129,22 @@ export function PackCard({ pack }: PackCardProps) {
               </span>
               <span className="text-sm font-medium text-[#1c1b1b]">
                 <span className="font-mono">{value}</span>
-                <span style={{ fontSize: 11, color: "#747878", marginLeft: 2 }}>
-                  mm
-                </span>
+                <span style={{ fontSize: 11, color: "#747878", marginLeft: 2 }}>mm</span>
               </span>
             </div>
           ))}
         </div>
 
         {/* CTA */}
-
         <Link
           href={`/packs/${pack.id}`}
           className="block w-full text-center text-white text-sm font-medium py-2.5 px-4 rounded-lg transition-colors"
           style={{ backgroundColor: "#1c1b1b" }}
           onMouseEnter={(e) =>
-            ((e.currentTarget as HTMLAnchorElement).style.backgroundColor =
-              "#000")
+            ((e.currentTarget as HTMLAnchorElement).style.backgroundColor = "#000")
           }
           onMouseLeave={(e) =>
-            ((e.currentTarget as HTMLAnchorElement).style.backgroundColor =
-              "#1c1b1b")
+            ((e.currentTarget as HTMLAnchorElement).style.backgroundColor = "#1c1b1b")
           }
         >
           View More Details
