@@ -1,5 +1,16 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { z } from "zod";
+
+/**
+ * Validates asset URLs returned by storage providers. Google Drive returns
+ * absolute URLs; Box-backed assets are served through our own same-origin
+ * `/api/download/...` proxy as a relative path.
+ */
+export const assetUrlSchema = z.string().refine(
+  (v) => /^https?:\/\//.test(v) || v.startsWith("/"),
+  { message: "Must be an absolute URL or a path starting with /" }
+);
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

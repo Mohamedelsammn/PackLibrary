@@ -1,4 +1,4 @@
-import { getDriveClient } from "@/lib/google-drive/client";
+import { getStorageProvider } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -13,22 +13,8 @@ export async function GET(
   const filename = rawName ? rawName.replace(/[/\\:*?"<>|]/g, "_") : null;
 
   try {
-    const drive = getDriveClient();
-    const res = await drive.files.get(
-      { fileId: driveId, alt: "media" },
-      { responseType: "stream" }
-    );
-
-    const stream = res.data as NodeJS.ReadableStream;
-    const chunks: Buffer[] = [];
-
-    await new Promise<void>((resolve, reject) => {
-      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-      stream.on("end", resolve);
-      stream.on("error", reject);
-    });
-
-    const buffer = Buffer.concat(chunks);
+    const storage = getStorageProvider();
+    const { buffer } = await storage.downloadFile(driveId);
 
     // Detect MIME from filename hint; default to GLB (binary)
     const is_gltf_json = filename?.toLowerCase().endsWith(".gltf");
@@ -42,7 +28,7 @@ export async function GET(
       headers["Content-Disposition"] = `attachment; filename="${filename}"`;
     }
 
-    return new Response(buffer, { headers });
+    return new Response(new Uint8Array(buffer), { headers });
   } catch (error) {
     return Response.json(
       {

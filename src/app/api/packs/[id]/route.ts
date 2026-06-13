@@ -2,7 +2,8 @@ import { z } from "zod";
 import { requireAdmin, unauthorizedResponse } from "@/app/api/_lib/auth-guard";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import { deleteFileFromDrive, deleteFolderByName } from "@/lib/google-drive/upload";
+import { getStorageProvider } from "@/lib/storage";
+import { assetUrlSchema } from "@/lib/utils";
 
 export const runtime = "nodejs";
 
@@ -19,15 +20,15 @@ const updatePackSchema = z.object({
   color:        z.string().max(100).nullable().optional(),
   size:         z.string().max(100).nullable().optional(),
   glbDriveId:     z.string().nullable().optional(),
-  glbUrl:         z.string().url().nullable().optional(),
+  glbUrl:         assetUrlSchema.nullable().optional(),
   dielineDriveId: z.string().nullable().optional(),
-  dielineUrl:     z.string().url().nullable().optional(),
-  thumbnailUrl:   z.string().url().nullable().optional(),
+  dielineUrl:     assetUrlSchema.nullable().optional(),
+  thumbnailUrl:   assetUrlSchema.nullable().optional(),
   images: z
     .array(
       z.object({
         driveId: z.string(),
-        url:     z.string().url(),
+        url:     assetUrlSchema,
         label:   z.string().max(100).optional(),
       })
     )
@@ -177,38 +178,31 @@ export async function DELETE(
     if (img.drive_id) driveIds.push(img.drive_id);
   }
 
-  // ── 3. Delete all Drive files concurrently (best-effort) ─────────────────
-  await Promise.allSettled(driveIds.map((fid) => deleteFileFromDrive(fid)));
+  const storage = getStorageProvider();
 
-  // ── 4. Try to delete the pack's Drive folder (best-effort) ────────────────
+  // ── 3. Delete all storage files concurrently (best-effort) ───────────────
+  await Promise.allSettled(driveIds.map((fid) => storage.deleteFile(fid)));
+
+  // ── 4. Try to delete the pack's storage folder (best-effort) ──────────────
   // Folder path: {rootFolderId} / {brandSlug} / {packSlug}
   // We don't store folder IDs, so we find the pack folder by slug name.
   // Best-effort — a failure here must not block the DB deletion.
   try {
-    const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
-    if (ROOT_FOLDER_ID) {
-      // Get brand slug to find the intermediate folder
-      const { data: brand } = await supabase
-        .from("brands")
-        .select("slug")
-        .eq("id", pack.brand_id)
-        .single();
+    const ROOT_FOLDER_ID = storage.getRootFolderId();
 
-      if (brand?.slug) {
-        const { getDriveClient } = await import("@/lib/google-drive/client");
-        const drive = getDriveClient();
+    // Get brand slug to find the intermediate folder
+    const { data: brand } = await supabase
+      .from("brands")
+      .select("slug")
+      .eq("id", pack.brand_id)
+      .single();
 
-        // Find brand folder
-        const brandFolderRes = await drive.files.list({
-          q: `name='${brand.slug}' and '${ROOT_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-          fields: "files(id)",
-        });
-        const brandFolderId = brandFolderRes.data.files?.[0]?.id;
+    if (brand?.slug) {
+      const brandFolderId = await storage.findFolderByName(brand.slug, ROOT_FOLDER_ID);
 
-        if (brandFolderId) {
-          // Delete pack folder (and all its subfolders) by pack slug
-          await deleteFolderByName(pack.slug, brandFolderId, true);
-        }
+      if (brandFolderId) {
+        // Delete pack folder (and all its subfolders) by pack slug
+        await storage.deleteFolderByName(pack.slug, brandFolderId, true);
       }
     }
   } catch {

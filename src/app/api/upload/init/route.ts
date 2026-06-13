@@ -1,19 +1,19 @@
 /**
  * POST /api/upload/init
  *
- * Creates a Google Drive resumable upload session and returns the session URI
- * to the browser. The browser then PUTs the file bytes directly to that URI
- * — no file bytes pass through Vercel, so there is no 4.5 MB body-size limit.
+ * Creates an upload session with the configured storage provider and returns
+ * the session URL to the browser. The browser then PUTs the file bytes
+ * directly to that URL.
  *
- * The session URI is a pre-authorised URL valid for 1 week. It grants write
- * access only to that specific upload slot, so it is safe to hand to the
- * browser.
+ * For Google Drive, this is a resumable upload session URI on Google's
+ * servers — no file bytes pass through Vercel, so there is no 4.5 MB
+ * body-size limit. For Box, this is a same-origin relay route
+ * (`/api/upload/relay`) that streams the bytes on to Box.
  */
 
 import { z } from "zod";
 import { requireAdmin, unauthorizedResponse } from "@/app/api/_lib/auth-guard";
-import { getOAuthClient } from "@/lib/google-drive/client";
-import { ensureFolder } from "@/lib/google-drive/upload";
+import { getStorageProvider } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -66,74 +66,18 @@ export async function POST(req: Request) {
 
   // Determine folder category from MIME type; default to "image" for unknowns
   const assetType: AssetType = MIME_WHITELIST[mimeType] ?? "image";
-
-  const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
-  if (!ROOT_FOLDER_ID) {
-    return Response.json(
-      { error: { code: "CONFIG_ERROR", message: "GOOGLE_DRIVE_FOLDER_ID not configured" } },
-      { status: 500 }
-    );
-  }
+  const folderPath = [brandSlug, packSlug, assetType];
 
   try {
-    // ── 1. Ensure folder hierarchy exists ────────────────────────────────────
-    let parentId = ROOT_FOLDER_ID;
-    for (const segment of [brandSlug, packSlug, assetType]) {
-      parentId = await ensureFolder(segment, parentId);
-    }
+    const storage = getStorageProvider();
+    const session = await storage.createUploadSession({
+      filename,
+      mimeType,
+      fileSize,
+      folderPath,
+    });
 
-    // ── 2. Get a fresh OAuth access token ─────────────────────────────────────
-    const auth = getOAuthClient();
-    const { token } = await auth.getAccessToken();
-
-    if (!token) {
-      return Response.json(
-        { error: { code: "AUTH_ERROR", message: "Could not obtain Google access token" } },
-        { status: 500 }
-      );
-    }
-
-    // ── 3. Create a resumable upload session with Google Drive ────────────────
-    const initResponse = await fetch(
-      "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable",
-      {
-        method: "POST",
-        headers: {
-          "Authorization":          `Bearer ${token}`,
-          "Content-Type":           "application/json",
-          "X-Upload-Content-Type":  mimeType,
-          "X-Upload-Content-Length": fileSize.toString(),
-        },
-        body: JSON.stringify({
-          name:    filename,
-          parents: [parentId],
-        }),
-      }
-    );
-
-    if (!initResponse.ok) {
-      const text = await initResponse.text().catch(() => "");
-      return Response.json(
-        {
-          error: {
-            code: "DRIVE_INIT_ERROR",
-            message: `Google Drive returned ${initResponse.status}: ${text.slice(0, 200)}`,
-          },
-        },
-        { status: 502 }
-      );
-    }
-
-    const uploadUrl = initResponse.headers.get("Location");
-    if (!uploadUrl) {
-      return Response.json(
-        { error: { code: "DRIVE_INIT_ERROR", message: "Google Drive did not return a session URI" } },
-        { status: 502 }
-      );
-    }
-
-    return Response.json({ data: { uploadUrl } }, { status: 200 });
-
+    return Response.json({ data: session }, { status: 200 });
   } catch (error) {
     return Response.json(
       {

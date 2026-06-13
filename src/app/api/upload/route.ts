@@ -1,5 +1,5 @@
 import { requireAdmin, unauthorizedResponse } from "@/app/api/_lib/auth-guard";
-import { uploadFileToDrive } from "@/lib/google-drive/upload";
+import { getStorageProvider } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -80,7 +80,8 @@ export async function POST(req: Request) {
   const folderPath = [brandSlug, packSlug, assetType];
 
   try {
-    const result = await uploadFileToDrive(buffer, fileName, mimeType, folderPath);
+    const storage = getStorageProvider();
+    const result = await storage.uploadFile(buffer, fileName, mimeType, folderPath);
     return Response.json({ data: result }, { status: 201 });
   } catch (error) {
     return Response.json(

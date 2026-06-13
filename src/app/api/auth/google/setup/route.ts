@@ -1,5 +1,5 @@
 import { requireAdmin, unauthorizedResponse } from "@/app/api/_lib/auth-guard";
-import { getOAuthClient } from "@/lib/google-drive/client";
+import { getGoogleOAuthClient } from "@/lib/storage/providers/google-drive";
 
 export const runtime = "nodejs";
 
@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   if (!isAdmin) return unauthorizedResponse();
 
   try {
-    const auth = getOAuthClient();
+    const auth = getGoogleOAuthClient();
     const url = auth.generateAuthUrl({
       access_type: "offline",
       scope: SCOPES,

@@ -1,4 +1,4 @@
-import { getGoogleOAuthClient } from "@/lib/storage/providers/google-drive";
+import { exchangeBoxAuthorizationCode } from "@/lib/storage/providers/box";
 
 export const runtime = "nodejs";
 
@@ -21,38 +21,24 @@ export async function GET(req: Request) {
     return new Response(renderHtml("Error", `
       <div class="error">
         <h2>Missing authorization code</h2>
-        <p>No authorization code was received from Google.</p>
+        <p>No authorization code was received from Box.</p>
       </div>
     `), { status: 400, headers: { "Content-Type": "text/html" } });
   }
 
   try {
-    const auth = getGoogleOAuthClient();
-    const { tokens } = await auth.getToken(code);
-    const refreshToken = tokens.refresh_token;
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const redirectUri = `${appUrl}/api/auth/box/callback`;
 
-    if (!refreshToken) {
-      return new Response(renderHtml("No Refresh Token", `
-        <div class="warning">
-          <h2>No refresh token received</h2>
-          <p>Google only sends the refresh token on the <strong>first</strong> authorization.
-             If you've authorized this app before, revoke access first:</p>
-          <ol>
-            <li>Go to <a href="https://myaccount.google.com/permissions" target="_blank">Google Account Permissions</a></li>
-            <li>Find this app and click <strong>Remove Access</strong></li>
-            <li>Return to the Setup page and authorize again</li>
-          </ol>
-        </div>
-      `), { headers: { "Content-Type": "text/html" } });
-    }
+    const tokens = await exchangeBoxAuthorizationCode(code, redirectUri);
 
-    return new Response(renderHtml("Google Drive Connected ✓", `
+    return new Response(renderHtml("Box Connected ✓", `
       <div class="success">
-        <h2>✓ Google Drive authorized successfully</h2>
+        <h2>✓ Box authorized successfully</h2>
         <p>Copy the refresh token below and add it to your <code>.env.local</code>:</p>
         <div class="token-box">
-          <label>GOOGLE_OAUTH_REFRESH_TOKEN</label>
-          <textarea id="token" rows="3" readonly onclick="this.select()">${refreshToken}</textarea>
+          <label>BOX_REFRESH_TOKEN</label>
+          <textarea id="token" rows="3" readonly onclick="this.select()">${tokens.refresh_token}</textarea>
           <button onclick="navigator.clipboard.writeText(document.getElementById('token').value).then(()=>this.textContent='Copied!')">
             Copy to clipboard
           </button>
@@ -61,15 +47,15 @@ export async function GET(req: Request) {
           <h3>Next steps:</h3>
           <ol>
             <li>Open <code>.env.local</code></li>
-            <li>Set <code>GOOGLE_OAUTH_REFRESH_TOKEN=</code> to the value above</li>
+            <li>Set <code>BOX_REFRESH_TOKEN=</code> to the value above</li>
+            <li>Set <code>STORAGE_PROVIDER=box</code> to switch uploads to Box</li>
             <li>Restart the dev server (<code>npm run dev</code>)</li>
-            <li>You're done — all future uploads will use your Google Drive</li>
           </ol>
         </div>
       </div>
     `), { headers: { "Content-Type": "text/html" } });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
     return new Response(renderHtml("Error", `
       <div class="error">
         <h2>Token exchange failed</h2>
@@ -119,7 +105,7 @@ function renderHtml(title: string, body: string): string {
 </head>
 <body>
   <div class="card">
-    <h1>Pack Library — Google Drive Setup</h1>
+    <h1>Pack Library — Box Setup</h1>
     ${body}
   </div>
 </body>

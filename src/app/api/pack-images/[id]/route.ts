@@ -1,6 +1,6 @@
 import { requireAdmin, unauthorizedResponse } from "@/app/api/_lib/auth-guard";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
-import { deleteFileFromDrive } from "@/lib/google-drive/upload";
+import { getStorageProvider } from "@/lib/storage";
 import { revalidatePath } from "next/cache";
 
 export const runtime = "nodejs";
@@ -29,8 +29,8 @@ export async function DELETE(
     return Response.json({ error: { code: "DB_ERROR", message: fetchError.message } }, { status: 500 });
   }
 
-  // Delete from Drive (best-effort)
-  await deleteFileFromDrive(img.drive_id).catch(() => null);
+  // Delete from storage (best-effort)
+  await getStorageProvider().deleteFile(img.drive_id).catch(() => false);
 
   // Delete from DB
   const { error: delError } = await supabase

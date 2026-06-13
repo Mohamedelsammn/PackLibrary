@@ -1,4 +1,4 @@
-import { getDriveClient } from "@/lib/google-drive/client";
+import { getStorageProvider } from "@/lib/storage";
 import path from "path";
 
 export const runtime = "nodejs";
@@ -14,9 +14,9 @@ const MIME_MAP: Record<string, string> = {
   ".pdf":  "application/pdf",
 };
 
-function mimeFromName(filename: string): string {
+function mimeFromName(filename: string): string | null {
   const ext = path.extname(filename).toLowerCase();
-  return MIME_MAP[ext] ?? "application/octet-stream";
+  return MIME_MAP[ext] ?? null;
 }
 
 export async function GET(
@@ -29,26 +29,13 @@ export async function GET(
   const rawName = url.searchParams.get("name") ?? driveId;
   // Sanitise: strip path traversal chars
   const filename = rawName.replace(/[/\\:*?"<>|]/g, "_");
-  const contentType = mimeFromName(filename);
 
   try {
-    const drive = getDriveClient();
-    const res = await drive.files.get(
-      { fileId: driveId, alt: "media" },
-      { responseType: "stream" }
-    );
+    const storage = getStorageProvider();
+    const { buffer, mimeType } = await storage.downloadFile(driveId);
+    const contentType = mimeFromName(filename) ?? mimeType ?? "application/octet-stream";
 
-    const stream = res.data as NodeJS.ReadableStream;
-    const chunks: Buffer[] = [];
-    await new Promise<void>((resolve, reject) => {
-      stream.on("data", (c: Buffer) => chunks.push(c));
-      stream.on("end", resolve);
-      stream.on("error", reject);
-    });
-
-    const buffer = Buffer.concat(chunks);
-
-    return new Response(buffer, {
+    return new Response(new Uint8Array(buffer), {
       headers: {
         "Content-Type": contentType,
         "Content-Length": String(buffer.length),

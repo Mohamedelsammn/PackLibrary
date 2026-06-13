@@ -13,6 +13,8 @@ const nextConfig: NextConfig = {
         hostname: "drive.google.com",
       },
     ],
+    // Box-backed assets are served through /api/download/... (same-origin),
+    // so no additional remote patterns are needed for the Box provider.
   },
 
   async headers() {

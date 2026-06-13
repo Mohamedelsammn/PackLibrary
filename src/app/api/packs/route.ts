@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { requireAdmin, unauthorizedResponse } from "@/app/api/_lib/auth-guard";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
-import { slugify } from "@/lib/utils";
+import { slugify, assetUrlSchema } from "@/lib/utils";
 import { revalidatePath } from "next/cache";
 
 export const runtime = "nodejs";
@@ -20,15 +20,15 @@ const createPackSchema = z.object({
   color:  z.string().max(100).optional(),
   size:   z.string().max(100).optional(),
   glbDriveId: z.string().optional(),
-  glbUrl: z.string().url().optional(),
+  glbUrl: assetUrlSchema.optional(),
   dielineDriveId: z.string().optional(),
-  dielineUrl: z.string().url().optional(),
-  thumbnailUrl: z.string().url().optional(),
+  dielineUrl: assetUrlSchema.optional(),
+  thumbnailUrl: assetUrlSchema.optional(),
   images: z
     .array(
       z.object({
         driveId: z.string(),
-        url: z.string().url(),
+        url: assetUrlSchema,
         label: z.string().max(100).optional(),
       })
     )

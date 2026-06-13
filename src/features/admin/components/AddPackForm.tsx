@@ -37,6 +37,7 @@ interface UploadResult {
   driveId:      string;
   viewLink:     string;
   downloadLink: string;
+  publicUrl:    string;
 }
 
 interface UploadState {
@@ -53,7 +54,7 @@ function detectAssetType(mimeType: string): "glb" | "image" | "dieline" {
   return "dieline";
 }
 
-function uploadToGoogleDrive(file: File, uploadUrl: string, onProgress: (p: number) => void): Promise<string> {
+function uploadFileBytes(file: File, uploadUrl: string, onProgress: (p: number) => void): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.min(99, Math.round((e.loaded / e.total) * 100))); };
@@ -61,9 +62,9 @@ function uploadToGoogleDrive(file: File, uploadUrl: string, onProgress: (p: numb
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const json = JSON.parse(xhr.responseText) as { id?: string };
-          if (!json.id) return reject(new Error("Google Drive did not return a file ID"));
+          if (!json.id) return reject(new Error("Storage provider did not return a file ID"));
           onProgress(100); resolve(json.id);
-        } catch { reject(new Error("Invalid response from Google Drive")); }
+        } catch { reject(new Error("Invalid response from storage provider")); }
       } else { reject(new Error(`Upload failed: HTTP ${xhr.status}`)); }
     };
     xhr.onerror   = () => reject(new Error("Network error during upload"));
@@ -90,7 +91,7 @@ async function uploadFileDirect(file: File, brandSlug: string, packSlug: string,
 
   let driveId: string | null = null;
   let uploadError: Error | null = null;
-  try { driveId = await uploadToGoogleDrive(file, initData.uploadUrl, onProgress); }
+  try { driveId = await uploadFileBytes(file, initData.uploadUrl, onProgress); }
   catch (err) { uploadError = err instanceof Error ? err : new Error("Upload failed"); }
 
   if (driveId) {
@@ -251,7 +252,7 @@ export function AddPackForm({ brands, initialData, packId }: AddPackFormProps) {
       }
       if (thumbnailFile) {
         coreTasks.push(uploadWithRetry(thumbnailFile, brandSlug, packSlug, setThumbUpload).then((r) => {
-          thumbnailUrl = `https://lh3.googleusercontent.com/d/${r.driveId}`;
+          thumbnailUrl = r.publicUrl;
         }));
       }
       if (dielineFile) {
@@ -281,7 +282,7 @@ export function AddPackForm({ brands, initialData, packId }: AddPackFormProps) {
           setProgress({ uploadStatus: "done", uploadProgress: 100 });
           uploadedImages.push({
             driveId: result.driveId,
-            url:     `https://lh3.googleusercontent.com/d/${result.driveId}`,
+            url:     result.publicUrl,
             label:   asset.name || undefined,
           });
         } catch (err) {

@@ -1,16 +1,16 @@
 /**
  * POST /api/upload/complete
  *
- * Called by the browser after it finishes uploading a file directly to Google
- * Drive via the resumable session URI. This route:
- *   1. Makes the newly-created file publicly readable (anyone with the link).
- *   2. Returns the Drive ID, view link, and download link to the browser so it
- *      can be stored in the Supabase database.
+ * Called by the browser after it finishes uploading a file directly via the
+ * session URI returned by /api/upload/init. Finalises the upload with the
+ * storage provider (e.g. making a Google Drive file publicly readable) and
+ * returns the file ID and URLs to the browser so it can be stored in the
+ * Supabase database.
  */
 
 import { z } from "zod";
 import { requireAdmin, unauthorizedResponse } from "@/app/api/_lib/auth-guard";
-import { getDriveClient } from "@/lib/google-drive/client";
+import { getStorageProvider } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -40,28 +40,18 @@ export async function POST(req: Request) {
     );
   }
 
-  const { driveId } = parsed.data;
+  const { driveId: fileId } = parsed.data;
 
   try {
-    const drive = getDriveClient();
-
-    // ── 1. Make the file publicly readable ────────────────────────────────────
-    await drive.permissions.create({
-      fileId: driveId,
-      requestBody: { role: "reader", type: "anyone" },
-    });
-
-    // ── 2. Fetch public metadata ───────────────────────────────────────────────
-    const file = await drive.files.get({
-      fileId: driveId,
-      fields: "id,webViewLink,webContentLink",
-    });
+    const storage = getStorageProvider();
+    const result = await storage.completeUpload(fileId);
 
     return Response.json({
       data: {
-        driveId,
-        viewLink:     file.data.webViewLink     ?? "",
-        downloadLink: file.data.webContentLink  ?? "",
+        driveId:      result.fileId,
+        viewLink:     result.viewUrl,
+        downloadLink: result.downloadUrl,
+        publicUrl:    result.publicUrl,
       },
     });
   } catch (error) {
